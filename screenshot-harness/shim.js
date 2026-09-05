@@ -10,6 +10,11 @@
 // It deliberately does NOT stub the Gemini call. Chat will fail if you try to
 // send a message, which is correct: capturing the interface needs no API key,
 // and this harness should never be given one.
+//
+// ?scene=<name> additionally loads scenes/<name>.json and replays it: the page
+// the sidebar is reading, the highlighted selection, and a transcript captured
+// from a real session. The UI renders it through its own code paths, so the
+// result is a faithful screenshot rather than a mock-up.
 (function () {
 	'use strict';
 
@@ -31,6 +36,21 @@
 		return out;
 	};
 
+	// A scene is a captured session: which page is open, what is highlighted,
+	// and what the model replied. Loaded synchronously so storage is already
+	// seeded by the time sidebar.js reads it.
+	let scene = null;
+	const sceneName = new URLSearchParams(location.search).get('scene');
+	if (sceneName) {
+		const req = new XMLHttpRequest();
+		req.open('GET', `/screenshot-harness/scenes/${sceneName}.json`, false);
+		req.send();
+		scene = JSON.parse(req.responseText);
+		const id = 'harness';
+		store.set('activeConvoId', id);
+		store.set(`convo_${id}`, { id, messages: scene.messages, conversationHistory: [] });
+	}
+
 	globalThis.browser = globalThis.chrome = {
 		storage: {
 			local: {
@@ -47,7 +67,14 @@
 			// Served from the extension root; theme-manager asks for
 			// "themes/<id>.json", which is root-relative there.
 			getURL: (path) => '/' + String(path).replace(/^\//, ''),
-			sendMessage: async () => ({ ok: false, error: 'harness: no background script' }),
+			sendMessage: async (msg) => {
+				// Only the page-context probe is answered; a chat request still
+				// fails, because answering it would mean holding an API key.
+				if (msg && msg.type === 'GET_CONTEXT' && scene) {
+					return { pageContext: { meta: scene.page } };
+				}
+				return { ok: false, error: 'harness: no background script' };
+			},
 			onMessage: { addListener() {}, removeListener() {} },
 			lastError: null
 		},
@@ -56,4 +83,17 @@
 			update: async () => {}
 		}
 	};
+
+	if (scene && scene.selection) {
+		window.addEventListener('load', () => {
+			const text = scene.selection;
+			const preview = text.length > 60 ? text.slice(0, 60) + '\u2026' : text;
+			document.getElementById('selectionText').textContent = `"${preview}"`;
+			document.getElementById('selectionBanner').classList.remove('hidden');
+			// The app scrolls to the newest message on render; do it again once
+			// layout has settled, or the last line is cut off in a capture.
+			const area = document.getElementById('messagesArea');
+			setTimeout(() => (area.scrollTop = area.scrollHeight), 300);
+		});
+	}
 })();

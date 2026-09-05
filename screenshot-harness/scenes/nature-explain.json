@@ -1,0 +1,14 @@
+{
+  "_comment": "A real Explain exchange, transcribed from assets/demo.gif so it can be re-rendered at full resolution. Nothing here is invented; it is what the model returned during that recording.",
+  "page": {
+    "title": "Champion-level drone racing using deep reinforcement learning | Nature",
+    "url": "https://www.nature.com/articles/s41586-023-06419-4"
+  },
+  "selection": "Deep RL3 has enabled some recent advances in artificial intelligence",
+  "messages": [
+    {
+      "role": "ai",
+      "text": "The highlighted text explains a significant challenge in artificial intelligence, particularly in the field of deep reinforcement learning (RL), which the current article aims to address.\n\nHere's a breakdown:\n\n* **Deep RL's Successes:**\n\n  * \"Deep RL has enabled some recent advances in artificial intelligence.\" Deep Reinforcement Learning (Deep RL) is an area of AI where algorithms learn to make decisions by trial and error in an environment, receiving rewards or penalties. It combines reinforcement learning with deep neural networks, allowing it to process complex, high-dimensional data (like images or raw sensor inputs).\n  * \"Policies trained with deep RL have outperformed humans in complex competitive games, including Atari, Go, chess, StarCraft, Dota 2 and Gran Turismo.\" This highlights Deep RL's impressive track record. AI systems powered by Deep RL have achieved superhuman performance in a wide range of games:\n  * **Atari games:** Demonstrated the ability to learn diverse strategies from raw pixel input.\n  * **Board games (Go, chess):** Mastered highly strategic games with vast state spaces.\n  * **Complex video games (StarCraft, Dota 2):** Excelled in real-time strategy games involving imperfect information, long-term planning, and multi-agent coordination.\n  * **Racing simulations (Gran Turismo):** Showed proficiency in continuous control tasks with realistic physics.\n  * These \"policies\" refer to the learned strategies or rules that the AI agent follows to achieve its goals within the game environment.\n\n* **The Simulation-to-Reality Gap:**\n\n  * \"These impressive demonstrations... have primarily been in simulation and board-game environments, which support training in an exact replica of the testing conditions.\" This is the critical limitation. While Deep RL has achieved incredible feats, most successes have occurred in purely digital environments. These environments offer:\n  * **Perfect information:** The AI often has a complete, precise understanding of the game state.\n  * **Deterministic or perfectly modeled physics:** The rules are precisely known and consistent."
+    }
+  ]
+}
