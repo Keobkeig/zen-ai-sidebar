@@ -177,6 +177,7 @@
         const div = document.createElement("div");
         div.className = "message message-ai";
         div.innerHTML = `<span class="message-label">Zen AI</span><div class="message-content">${msg.html || renderMarkdown(msg.text)}</div>`;
+        if (msg.notice) appendMessageNotice(div.querySelector(".message-content"), msg.notice);
         messagesArea.appendChild(div);
       } else if (msg.role === "error") {
         const div = document.createElement("div");
@@ -184,7 +185,7 @@
         div.innerHTML = `<span class="message-label">Error</span><div class="message-content">${escapeHtml(msg.text)}</div>`;
         messagesArea.appendChild(div);
       } else if (msg.role === "transcript") {
-        addTranscriptMessage(msg.text, msg.videoTitle, msg.aiGenerated, msg.source);
+        addTranscriptMessage(msg.text, msg.videoTitle, msg.aiGenerated, msg.source, msg.notice);
       }
     }
     scrollToBottom();
@@ -516,7 +517,7 @@
     return div.querySelector(".message-content");
   }
 
-  function addTranscriptMessage(transcript, videoTitle, aiGenerated, source = "") {
+  function addTranscriptMessage(transcript, videoTitle, aiGenerated, source = "", notice = "") {
     const welcome = messagesArea.querySelector(".welcome-message");
     if (welcome) welcome.remove();
 
@@ -538,6 +539,7 @@
     const preHtml = `<pre><code>${escapeHtml(transcript)}</code></pre>`;
 
     contentDiv.innerHTML = titleHtml + noteHtml + preHtml;
+    if (notice) appendMessageNotice(contentDiv, notice);
 
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
@@ -564,7 +566,7 @@
     messagesArea.appendChild(div);
     scrollToBottom();
 
-    messages.push({ role: "transcript", text: transcript, videoTitle, aiGenerated: !!aiGenerated, source });
+    messages.push({ role: "transcript", text: transcript, videoTitle, aiGenerated: !!aiGenerated, source, notice });
   }
 
   function scrollToBottom() {
@@ -642,7 +644,7 @@
 
   function renderCodeBlock(code, info) {
     const language = normalizeCodeLanguage(info);
-    const displayLanguage = language ? language.toUpperCase() : "TEXT";
+    const displayLanguage = escapeHtml(language ? language.toUpperCase() : "TEXT");
     const codeClass = `language-${language || "none"}`;
     let rendered = escapeHtml(code);
     try {
@@ -663,7 +665,15 @@
       ts: "typescript", cs: "csharp", "c#": "csharp", "c++": "cpp",
       golang: "go", rs: "rust", md: "markdown", text: "", plaintext: "",
     };
-    return aliases[source] ?? source;
+    // hasOwn, not `aliases[source] ?? source`: a fence tagged "__proto__"
+    // otherwise resolves to Object.prototype.
+    const language = Object.hasOwn(aliases, source) ? aliases[source] : source;
+    // renderCodeBlock interpolates this straight into a class attribute, and
+    // code blocks never reach sanitizeMarkdownHtml -- they are restored from
+    // placeholders after it runs. So anything that is not a plain language
+    // identifier is dropped. A fence tagged `a"onmouseover="alert(1)"` would
+    // otherwise close the attribute and land an event handler on the <pre>.
+    return /^[a-z0-9+#.-]{1,20}$/.test(language) ? language : "";
   }
 
   function sanitizeMarkdownHtml(html) {
@@ -715,6 +725,17 @@
     const div = document.createElement("div");
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // Why the response is short, attached to the response itself. textContent,
+  // so the reason string can never become markup.
+  function appendMessageNotice(container, text) {
+    if (!container || !text) return;
+    const note = document.createElement("div");
+    note.className = "message-notice";
+    note.setAttribute("role", "note");
+    note.textContent = text;
+    container.appendChild(note);
   }
 
   function getSafeUrl(encodedHref, allowedProtocols) {
@@ -784,9 +805,10 @@
       if (msg.done) {
         if (settled) return;
         settled = true;
+        if (msg.notice) appendMessageNotice(aiContent, msg.notice);
         conversationHistory.push({ role: "user", text: msg.requestText || displayText });
         conversationHistory.push({ role: "model", text: fullResponse });
-        messages.push({ role: "ai", text: fullResponse });
+        messages.push({ role: "ai", text: fullResponse, notice: msg.notice || "" });
         finishRequest();
       }
     }
@@ -885,7 +907,7 @@
         messages.push({ role: "error", text: response.error });
       } else if (response?.transcript) {
         aiContent.closest(".message").remove();
-        addTranscriptMessage(response.transcript, response.videoTitle, response.aiGenerated, response.source);
+        addTranscriptMessage(response.transcript, response.videoTitle, response.aiGenerated, response.source, response.notice);
       } else {
         aiContent.closest(".message").classList.add("message-error");
         aiContent.textContent = "Failed to get transcript.";

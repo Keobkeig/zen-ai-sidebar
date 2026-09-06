@@ -7,20 +7,28 @@
   // Track current selection
   let currentSelection = "";
 
-  // Listen for selection changes
-  document.addEventListener("selectionchange", () => {
+  // selectionchange fires on every caret move, which includes every keystroke
+  // in every text field on the page. Debounce before doing any work: reading
+  // the selection and messaging the background on each one is pure waste, and
+  // this script runs on every page the user visits.
+  let selectionTimer = null;
+
+  function publishSelection() {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
-    if (text !== currentSelection) {
-      currentSelection = text;
-      // Notify sidebar about selection change
-      browser.runtime.sendMessage({
-        type: "SELECTION_CHANGED",
-        selection: currentSelection,
-      }).catch(() => {
-        // Sidebar may not be open — ignore
-      });
-    }
+    if (text === currentSelection) return;
+    currentSelection = text;
+    browser.runtime.sendMessage({
+      type: "SELECTION_CHANGED",
+      selection: currentSelection,
+    }).catch(() => {
+      // Sidebar may not be open — ignore
+    });
+  }
+
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(publishSelection, 200);
   });
 
   // Extract clean page text
@@ -127,42 +135,6 @@
     };
   }
 
-  // Detect if current page is an academic paper
-  function isAcademicPaper() {
-    const url = window.location.href.toLowerCase();
-
-    // Check URL patterns
-    const academicDomains = [
-      "arxiv.org",
-      "doi.org",
-      "pubmed.ncbi.nlm.nih.gov",
-      "ieee.org",
-      "acm.org",
-      "semanticscholar.org",
-      "scholar.google.com",
-      "biorxiv.org",
-      "medrxiv.org",
-      "ssrn.com",
-      "researchgate.net",
-      "nature.com/articles",
-      "science.org/doi",
-      "springer.com/article",
-      "wiley.com/doi",
-    ];
-
-    const isAcademicUrl = academicDomains.some(domain => url.includes(domain));
-
-    // Check for citation meta tags
-    const hasCitationMeta = !!(
-      document.querySelector('meta[name="citation_title"]') ||
-      document.querySelector('meta[name="citation_author"]') ||
-      document.querySelector('meta[name="citation_doi"]') ||
-      document.querySelector('meta[name="dc.type"][content="article" i]')
-    );
-
-    return isAcademicUrl || hasCitationMeta;
-  }
-
   // Handle messages from background/sidebar
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
@@ -184,10 +156,6 @@
         window.getSelection()?.removeAllRanges();
         currentSelection = "";
         sendResponse({ selection: "" });
-        return true;
-
-      case "IS_ACADEMIC_PAPER":
-        sendResponse({ isPaper: isAcademicPaper() });
         return true;
 
       default:

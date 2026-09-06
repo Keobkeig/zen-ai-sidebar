@@ -1084,3 +1084,16 @@ select:focus {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Why a response is short: length limit, safety block, empty reply. Attached
+   to the message it describes rather than shown as a separate error bubble. */
+.message-notice {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent, #8839ef);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-secondary, rgba(128, 128, 128, 0.08));
+  color: var(--text-secondary, #6c6f85);
+  font-size: 12px;
+  line-height: 1.45;
+}

@@ -1,0 +1,42 @@
+<!-- Loads the real sidebar with the render-check scene and asserts against the
+     rendered DOM. Serve the harness, then open:
+       http://localhost:8777/screenshot-harness/renderer-check.html -->
+<meta charset="utf-8">
+<title>Renderer check</title>
+<style>
+  body { font: 14px ui-monospace, monospace; margin: 16px; }
+  iframe { width: 560px; height: 300px; border: 1px solid #ccc; }
+  .pass { color: #2a7d2a; } .fail { color: #c02626; font-weight: bold; }
+  pre { font-size: 15px; line-height: 1.6; }
+</style>
+<iframe id="f" src="/sidebar/sidebar.html?theme=catppuccin-latte&scene=render-check"></iframe>
+<pre id="out">running…</pre>
+<script>
+  const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
+
+  const checks = (area) => {
+    const handlers = [...area.querySelectorAll("*")]
+      .filter((e) => [...e.attributes].some((a) => a.name.startsWith("on")));
+    const codeText = [...area.querySelectorAll("pre code")].map((c) => c.textContent).join(" ");
+    return [
+      ["no event handlers in output", handlers.length === 0, handlers.length + " found"],
+      ["nested list renders as <ul>", area.querySelectorAll("li ul").length > 0, ""],
+      ["ordered list renders as <ol>", area.querySelectorAll("ol").length > 0, ""],
+      ["table renders", area.querySelectorAll("table").length > 0, ""],
+      ["KaTeX renders", area.querySelectorAll(".katex").length >= 2, ""],
+      ["Prism highlights code", area.querySelectorAll("code .token").length > 0, ""],
+      ["** survives inside a fence", codeText.includes("**"), ""],
+      ["inline code keeps **/*.ts", [...area.querySelectorAll("code")].some((c) => c.textContent === "**/*.ts"), ""],
+      ["hostile fence yields no class", [...area.querySelectorAll("pre")].every((p) => !/["']/.test(p.className)), ""],
+    ];
+  };
+
+  document.getElementById("f").onload = () => setTimeout(() => {
+    const area = f.contentDocument.getElementById("messagesArea");
+    const rows = checks(area);
+    out.innerHTML = rows
+      .map(([name, ok, extra]) =>
+        `<span class="${ok ? "pass" : "fail"}">${ok ? "PASS" : "FAIL"}</span>  ${esc(name)}${extra && !ok ? "  (" + esc(extra) + ")" : ""}`)
+      .join("\n") + `\n\n${rows.filter((r) => r[1]).length}/${rows.length} passed`;
+  }, 2500);
+</script>

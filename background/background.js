@@ -214,6 +214,11 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
     const decoder = new TextDecoder();
     let buffer = "";
     let fullResponse = "";
+    // A run that stops early looks exactly like one that finished, unless the
+    // stop reason is carried back out. MAX_TOKENS is easy to hit on the longer
+    // quick actions, and a safety block otherwise yields a silent empty bubble.
+    let finishReason = "";
+    let blockReason = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -237,6 +242,10 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
               fullResponse += text;
               sendChunk(text);
             }
+            const reason = parsed?.candidates?.[0]?.finishReason;
+            if (reason) finishReason = reason;
+            const blocked = parsed?.promptFeedback?.blockReason;
+            if (blocked) blockReason = blocked;
           } catch (e) {
             // Partial JSON, skip
           }
@@ -244,7 +253,7 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
       }
     }
 
-    return fullResponse;
+    return { text: fullResponse, finishReason, blockReason };
   }
 
   // ===== Zen Browser Theme Detection =====
@@ -405,14 +414,28 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
       const transcript = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!transcript) {
-        return { error: "AI transcription returned no result." };
+        const blocked = data?.promptFeedback?.blockReason;
+        return {
+          error: blocked
+            ? `AI transcription was blocked: ${blocked.toLowerCase().replace(/_/g, " ")}.`
+            : "AI transcription returned no result.",
+        };
       }
+
+      // A long video runs past maxOutputTokens well before it runs out of
+      // speech, and a half transcript that claims to be whole is worse than
+      // one that admits it stopped.
+      const truncated = data?.candidates?.[0]?.finishReason === "MAX_TOKENS";
 
       return {
         transcript: transcript,
         entries: transcript.split("\n").filter(l => l.trim()).length,
         videoTitle: videoTitle || "",
         aiGenerated: true,
+        truncated,
+        notice: truncated
+          ? "Transcript reached the model's output limit and stops early."
+          : "",
       };
     } catch (e) {
       return { error: "AI transcription failed: " + e.message };
@@ -547,7 +570,7 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
       }
 
       // Stream response
-      await streamGeminiResponse(
+      const result = await streamGeminiResponse(
         apiKey,
         model,
         systemPrompt,
@@ -564,12 +587,26 @@ if (typeof browser === "undefined" && typeof importScripts === "function") {
         controller.signal
       );
 
-      // Signal completion
+      // Signal completion. `notice` is how the panel learns the answer is not
+      // whole: without it a truncated or blocked reply is indistinguishable
+      // from a finished one.
+      let notice = "";
+      if (result.blockReason) {
+        notice = `The model stopped: ${result.blockReason.toLowerCase().replace(/_/g, " ")}.`;
+      } else if (result.finishReason && !["STOP", "FINISH_REASON_UNSPECIFIED"].includes(result.finishReason)) {
+        notice = result.finishReason === "MAX_TOKENS"
+          ? "Response cut off at the length limit — ask for a shorter answer, or for the rest."
+          : `Response ended early (${result.finishReason.toLowerCase().replace(/_/g, " ")}).`;
+      } else if (!result.text.trim()) {
+        notice = "The model returned an empty response.";
+      }
+
       browser.runtime.sendMessage({
         type: "CHAT_RESPONSE",
         requestId,
         done: true,
         requestText: finalMessage,
+        notice,
       }).catch(() => {});
     } catch (error) {
       if (error.name === "AbortError") return;

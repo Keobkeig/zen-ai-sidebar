@@ -1,0 +1,33 @@
+{
+  "name": "zen-ai-sidebar",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Firefox/Zen sidebar extension putting a page-aware Gemini chat in the browser.",
+  "license": "MIT",
+  "scripts": {
+    "lint": "web-ext lint",
+    "build": "web-ext build --overwrite-dest",
+    "start": "web-ext run"
+  },
+  "devDependencies": {
+    "web-ext": "^8.3.0"
+  },
+  "webExt": {
+    "sourceDir": ".",
+    "artifactsDir": "web-ext-artifacts",
+    "ignoreFiles": [
+      "assets/**",
+      "screenshot-harness/**",
+      "native-host/**",
+      "manifest.chrome.json",
+      "shared/README.md",
+      "package.json",
+      "package-lock.json",
+      "node_modules/**",
+      "web-ext-artifacts/**",
+      ".claude/**",
+      "**/LOCAL-CHANGES.md",
+      "icons/icon-source-640.png"
+    ]
+  }
+}

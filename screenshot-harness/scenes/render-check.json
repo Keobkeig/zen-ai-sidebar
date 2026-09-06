@@ -1,0 +1,11 @@
+{
+  "_comment": "Not a captured session. A fixture that pushes the renderer: nested lists, an ordered list, a table, math, a highlighted code fence, and a fence whose language string tries to break out of the class attribute.",
+  "page": { "title": "Renderer fixture", "url": "https://example.com/fixture" },
+  "selection": "",
+  "messages": [
+    {
+      "role": "ai",
+      "text": "Nested and ordered lists:\n\n* Top level\n  * Nested item\n  * Another nested\n* Second top\n\n1. First\n2. Second\n\n| Col | Meaning |\n|---|---|\n| a | one |\n\nInline math $E = mc^2$ and display:\n\n$$\\sum_{i=1}^{n} x_i$$\n\nHighlighted code:\n\n```python\ndef f(x):\n    return x ** 2  # ** must not become bold\n```\n\nGlob in inline code: `**/*.ts`\n\nHostile fence language:\n\n```a\"onmouseover=\"alert(1)\"\nconsole.log(\"x\")\n```\n"
+    }
+  ]
+}

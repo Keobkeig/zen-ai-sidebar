@@ -34,23 +34,37 @@
   ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["shared/browser-api.js", "content/content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shared/browser-api.js",
+        "content/content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.youtube.com/watch*"],
-      "js": ["shared/browser-api.js", "content/youtube-transcript.js"],
+      "matches": [
+        "*://*.youtube.com/watch*"
+      ],
+      "js": [
+        "shared/browser-api.js",
+        "content/youtube-transcript.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "background": {
-    "scripts": ["shared/browser-api.js", "background/background.js"]
+    "scripts": [
+      "shared/browser-api.js",
+      "background/background.js"
+    ]
   },
   "browser_specific_settings": {
     "gecko": {
       "id": "zen-ai-sidebar@extension",
       "strict_min_version": "109.0"
     }
-  }
+  },
+  "content_security_policy": "script-src 'self'; object-src 'self'; base-uri 'none'"
 }
