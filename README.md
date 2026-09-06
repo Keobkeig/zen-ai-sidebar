@@ -23,6 +23,46 @@ Extension adding AI sidebar for [Zen Browser](https://zen-browser.app) and Firef
 3. Select the `manifest.json` file from this repo
 4. Toggle the sidebar with **Cmd+Shift+U** (Mac) or **Ctrl+Shift+U** (Windows/Linux)
 
+## What leaves your browser
+
+The extension has no backend. Requests go from your browser straight to the
+Gemini endpoint using your own key, so there is no server of mine that sees
+your pages or your key.
+
+What *is* transmitted, and to whom:
+
+| Data | Goes to | Can you turn it off? |
+|---|---|---|
+| Your typed question | Google (Gemini) | No — it is the request |
+| Page title, URL and extracted text | Google (Gemini) | Yes — **Include page context** in Settings |
+| Highlighted text | Google (Gemini) | Only sent for the **Explain** action |
+| Video audio | Nothing leaves the machine when Local Whisper is the transcript provider | n/a |
+
+That maps onto the manifest as `data_collection_permissions: { required:
+["none"], optional: ["websiteContent", "websiteActivity"] }` — page data is
+optional because the setting genuinely turns it off, not because it is
+incidental.
+
+## Distribution
+
+This is **self-distributed, not listed on addons.mozilla.org**, and that is a
+deliberate choice rather than an oversight.
+
+The optional Local Whisper helper (`native-host/`) uses `yt-dlp` to pull audio
+for videos that have no captions. That is squarely against YouTube's terms of
+service, and AMO has removed listed extensions for less. Rather than cripple
+the feature to get a listing, the helper lives outside the extension: it is a
+separate program you install yourself, the extension only talks to it over
+native messaging, and nothing downloads anything unless you have chosen to
+install it.
+
+If you do install it, you are the one making that call — which is the honest
+place for the decision to sit.
+
+The extension half is kept AMO-clean regardless (`npm run lint` reports zero
+errors), so listing it later would only mean dropping the native-messaging
+fallback.
+
 ## Setup
 
 1. Get a Gemini API key from [aistudio.google.com](https://aistudio.google.com/apikey)

@@ -36,3 +36,21 @@ Firefox/Zen Manifest V2 build.
   members-only, DRM-protected, or region-blocked videos.
 - The helper is local, but `yt-dlp` still contacts YouTube to retrieve the
   public audio stream.
+
+## Before you install this
+
+Downloading audio from YouTube is against YouTube's terms of service, whatever
+the tool. That is why this helper is a separate program rather than part of the
+extension: installing it is a deliberate act on your part, and the extension
+does nothing of the sort on its own.
+
+It is also why the extension is self-distributed rather than listed on
+addons.mozilla.org — see **Distribution** in the top-level README.
+
+If you would rather not, the extension works fine without this helper:
+
+- Videos that have captions use them, and never reach this path at all.
+- For captionless videos, switch **Transcript provider** to *Gemini* in
+  Settings. Google fetches the video server-side, so nothing is downloaded to
+  your machine — at the cost of sending the video URL to Google, and of Gemini's
+  video support being aimed at understanding rather than verbatim transcription.
