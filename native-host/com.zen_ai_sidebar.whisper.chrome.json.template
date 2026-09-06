@@ -1,0 +1,7 @@
+{
+  "name": "com.zen_ai_sidebar.whisper",
+  "description": "Local Whisper transcription for Zen AI Sidebar",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://__CHROME_EXTENSION_ID__/"]
+}

@@ -172,8 +172,18 @@
         sendResponse({ content, meta });
         return true;
 
+      case "GET_PAGE_META":
+        sendResponse({ meta: getPageMeta() });
+        return true;
+
       case "GET_SELECTION":
         sendResponse({ selection: currentSelection });
+        return true;
+
+      case "CLEAR_SELECTION":
+        window.getSelection()?.removeAllRanges();
+        currentSelection = "";
+        sendResponse({ selection: "" });
         return true;
 
       case "IS_ACADEMIC_PAPER":

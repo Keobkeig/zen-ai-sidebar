@@ -6,13 +6,15 @@ Extension adding AI sidebar for [Zen Browser](https://zen-browser.app) and Firef
 
 ## Features
 
-- **Page-aware AI chat**: automatically reads the current page and uses it as context
+- **Page-aware AI chat**: optionally includes the current page as context, with quoted supporting evidence in responses
 - **Text selection detection**: highlight text and ask about it
 - **Quick actions**: one-click Summarize, Explain, Key Points, Research Paper summary, and YouTube Transcript export
 - **Catppuccin themes**: Latte, Frappe, Macchiato, and Mocha, plus Zen Browser auto-matching and custom theme import
 - **Layout flip**: mirror the sidebar layout for left-side use
 - **Customizable hotkey**: change the sidebar toggle shortcut from settings
-- **Bring your own key**: uses your Gemini API key, no third-party servers
+- **Bring your own key**: uses your Gemini API key, with no intermediary server
+- **Private no-caption transcripts**: optional Local Whisper fallback transcribes public YouTube audio on your machine
+- **Rich answers**: safe GitHub-flavored Markdown, KaTeX math, tables, task lists, images, and syntax-highlighted code blocks with copy buttons
 
 ## Install
 
@@ -26,6 +28,16 @@ Extension adding AI sidebar for [Zen Browser](https://zen-browser.app) and Firef
 1. Get a Gemini API key from [aistudio.google.com](https://aistudio.google.com/apikey)
 2. Open the sidebar → click the **gear icon**
 3. Paste your API key → choose a model → **Save**
+
+By default, the sidebar sends page content to Gemini only when you ask a question or use a quick action. Turn off **Include page content with requests** in Settings to send only your question (and highlighted text when you choose Explain).
+
+For captionless YouTube videos, choose **Local Whisper** in Settings and follow the one-time setup in [native-host/README.md](native-host/README.md). It downloads temporary public-video audio, transcribes it locally, and removes the audio afterward. Gemini remains an opt-in cloud fallback.
+
+## Chrome
+
+The default `manifest.json` targets Zen/Firefox. Chrome uses Manifest V3 and
+the Side Panel API; see [native-host/README.md](native-host/README.md) for the
+Chrome manifest and Local Whisper host setup.
 
 ### Available Models
 
@@ -77,7 +89,7 @@ Choose from the settings dropdown:
 | **Explain** | Explain highlighted text or page content |
 | **Key Points** | Extract bullet-point key points |
 | **Research Paper** | Structured analysis (title, authors, abstract, methodology, findings, limitations, conclusion) — works on arxiv, PubMed, IEEE, and other academic sites |
-| **Transcript** | Extract YouTube video transcript with timestamps (appears only on YouTube watch pages) |
+| **Transcript** | Extract the viewer's preferred YouTube caption track with timestamps; when none is available, use Local Whisper (private) or opt in to Gemini transcription. The label identifies the source. |
 
 ## License
 

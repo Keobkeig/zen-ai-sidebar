@@ -11,14 +11,19 @@
   let currentSelection = "";
   let isStreaming = false;
   let currentRequestId = 0;
+  let activeRequest = null;
   let isEditingShortcut = false;
   let pendingShortcut = "";
+  let lastFocusedElement = null;
+  let isPinnedToBottom = true;
   const MAX_CONVERSATIONS = 50;
 
   // ===== DOM Elements =====
   const messagesArea = document.getElementById("messagesArea");
   const chatInput = document.getElementById("chatInput");
   const sendBtn = document.getElementById("sendBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+  const jumpLatestBtn = document.getElementById("jumpLatestBtn");
   const clearBtn = document.getElementById("clearBtn");
   const historyBtn = document.getElementById("historyBtn");
   const historyPanel = document.getElementById("historyPanel");
@@ -29,6 +34,8 @@
   const settingsClose = document.getElementById("settingsClose");
   const apiKeyInput = document.getElementById("apiKeyInput");
   const modelSelect = document.getElementById("modelSelect");
+  const includePageContext = document.getElementById("includePageContext");
+  const transcriptProvider = document.getElementById("transcriptProvider");
   const themeSelect = document.getElementById("themeSelect");
   const toggleKeyVisibility = document.getElementById("toggleKeyVisibility");
   const saveSettingsBtn = document.getElementById("saveSettings");
@@ -49,6 +56,7 @@
 
   // ===== Init =====
   async function init() {
+    setupRuntimeListeners();
     await ThemeManager.init();
     loadSettings();
     updateContextBar();
@@ -56,6 +64,7 @@
     loadCustomThemeOptions();
     loadCurrentShortcut();
     await restoreLastConversation();
+    document.documentElement.dataset.sidebarReady = "true";
   }
 
   // ===== Conversation Persistence =====
@@ -175,7 +184,7 @@
         div.innerHTML = `<span class="message-label">Error</span><div class="message-content">${escapeHtml(msg.text)}</div>`;
         messagesArea.appendChild(div);
       } else if (msg.role === "transcript") {
-        addTranscriptMessage(msg.text, msg.videoTitle, msg.aiGenerated);
+        addTranscriptMessage(msg.text, msg.videoTitle, msg.aiGenerated, msg.source);
       }
     }
     scrollToBottom();
@@ -272,7 +281,7 @@
   async function loadSettings() {
     try {
       const result = await browser.storage.local.get([
-        "geminiApiKey", "geminiModel", "sidebarTheme", "sidebarLayout"
+        "geminiApiKey", "geminiModel", "sidebarTheme", "sidebarLayout", "includePageContext", "transcriptProvider"
       ]);
       if (result.geminiApiKey) {
         apiKeyInput.value = result.geminiApiKey;
@@ -280,6 +289,8 @@
       if (result.geminiModel) {
         modelSelect.value = result.geminiModel;
       }
+      includePageContext.checked = result.includePageContext !== false;
+      transcriptProvider.value = result.transcriptProvider || "local-whisper";
       themeSelect.value = result.sidebarTheme || "system";
 
       const layout = result.sidebarLayout || "default";
@@ -302,15 +313,12 @@
       geminiModel: model,
       sidebarTheme: theme,
       sidebarLayout: layout,
+      includePageContext: includePageContext.checked,
+      transcriptProvider: transcriptProvider.value,
     });
 
     await ThemeManager.applyTheme(theme);
     applyLayout(layout);
-
-    await browser.runtime.sendMessage({
-      type: "SET_MODEL",
-      model: model,
-    }).catch(() => {});
 
     showSaveStatus("Settings saved", false);
   }
@@ -445,6 +453,7 @@
   async function updateContextBar() {
     try {
       const response = await browser.runtime.sendMessage({ type: "GET_CONTEXT" });
+      updateSelectionBanner(response?.selection || "");
       if (response?.pageContext?.meta?.title) {
         contextText.textContent = response.pageContext.meta.title;
         contextBar.title = response.pageContext.meta.url || "";
@@ -507,7 +516,7 @@
     return div.querySelector(".message-content");
   }
 
-  function addTranscriptMessage(transcript, videoTitle, aiGenerated) {
+  function addTranscriptMessage(transcript, videoTitle, aiGenerated, source = "") {
     const welcome = messagesArea.querySelector(".welcome-message");
     if (welcome) welcome.remove();
 
@@ -517,7 +526,13 @@
     const contentDiv = document.createElement("div");
     contentDiv.className = "message-content";
 
-    const label = aiGenerated ? "Transcript (AI-generated)" : "Transcript";
+    const label = aiGenerated
+      ? "Transcript (AI-generated)"
+      : source === "youtube-captions"
+        ? "Transcript (YouTube captions)"
+        : source === "local-whisper"
+          ? "Transcript (Local Whisper)"
+        : "Transcript";
     const titleHtml = videoTitle ? `<h3>${label}: ${escapeHtml(videoTitle)}</h3>` : `<h3>${label}</h3>`;
     const noteHtml = aiGenerated ? `<p class="transcript-note">Transcribed by Gemini.</p>` : "";
     const preHtml = `<pre><code>${escapeHtml(transcript)}</code></pre>`;
@@ -549,12 +564,12 @@
     messagesArea.appendChild(div);
     scrollToBottom();
 
-    messages.push({ role: "transcript", text: transcript, videoTitle, aiGenerated: !!aiGenerated });
+    messages.push({ role: "transcript", text: transcript, videoTitle, aiGenerated: !!aiGenerated, source });
   }
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
-      messagesArea.scrollTop = messagesArea.scrollHeight;
+      if (isPinnedToBottom) messagesArea.scrollTop = messagesArea.scrollHeight;
     });
   }
 
@@ -562,126 +577,138 @@
   function renderMarkdown(text) {
     if (!text) return "";
 
-    // Extract LaTeX blocks and code blocks before escaping to preserve them
-    const placeholders = [];
+    // Markdown itself never gets to inject HTML. Code and math are protected
+    // before parsing, then restored from values created locally below.
+    const placeholders = new Map();
+    const placeholderPrefix = `ZEN_RENDER_${Math.random().toString(36).slice(2)}_`;
+    const putPlaceholder = (html) => {
+      const token = `${placeholderPrefix}${placeholders.size}_TOKEN`;
+      placeholders.set(token, html);
+      return token;
+    };
     let processed = text;
 
-    // Protect code blocks first
-    processed = processed.replace(/```(\w*)\n([\s\S]*?)```/g, (match) => {
-      const id = placeholders.length;
-      placeholders.push({ type: "codeblock", raw: match });
-      return `\x00PLACEHOLDER_${id}\x00`;
+    // Fence first so Markdown and math syntax inside code remains literal.
+    processed = processed.replace(/(^|\n)(`{3,}|~{3,})[ \t]*([^\n]*)\n([\s\S]*?)^\2[ \t]*(?=\n|$)/gm, (_, start, __, info, code) => {
+      return `${start}${putPlaceholder(renderCodeBlock(code.replace(/\n$/, ""), info))}`;
     });
 
-    // Protect inline code
-    processed = processed.replace(/`([^`]+)`/g, (match) => {
-      const id = placeholders.length;
-      placeholders.push({ type: "inlinecode", raw: match });
-      return `\x00PLACEHOLDER_${id}\x00`;
+    processed = processed.replace(/(^|[^`])(`+)([^\n]*?)\2(?!`)/g, (_, start, __, code) => {
+      return `${start}${putPlaceholder(`<code class="inline-code">${escapeHtml(code)}</code>`)}`;
     });
 
-    // Protect display LaTeX ($$...$$)
+    // Support the four common KaTeX delimiters.
     processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (_, tex) => {
-      const id = placeholders.length;
-      try {
-        const rendered = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-        placeholders.push({ type: "latex", html: rendered });
-      } catch (e) {
-        placeholders.push({ type: "latex", html: escapeHtml(tex) });
-      }
-      return `\x00PLACEHOLDER_${id}\x00`;
+      return putPlaceholder(renderLatex(tex, true));
     });
 
-    // Protect inline LaTeX ($...$) — avoid matching currency like $5
-    processed = processed.replace(/\$([^\s$](?:[^$]*[^\s$])?)\$/g, (_, tex) => {
-      const id = placeholders.length;
-      try {
-        const rendered = katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
-        placeholders.push({ type: "latex", html: rendered });
-      } catch (e) {
-        placeholders.push({ type: "latex", html: escapeHtml(tex) });
-      }
-      return `\x00PLACEHOLDER_${id}\x00`;
+    // Avoid treating common prices as math while allowing $x$, $E=mc^2$ and
+    // TeX commands such as $\\frac{1}{2}$.
+    processed = processed.replace(/\$([^\s$](?:[^$\n]*[^\s$])?)\$/g, (match, tex) => {
+      return looksLikeMath(tex) ? putPlaceholder(renderLatex(tex, false)) : match;
     });
 
-    // Protect \[...\] display math
     processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (_, tex) => {
-      const id = placeholders.length;
-      try {
-        const rendered = katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false });
-        placeholders.push({ type: "latex", html: rendered });
-      } catch (e) {
-        placeholders.push({ type: "latex", html: escapeHtml(tex) });
-      }
-      return `\x00PLACEHOLDER_${id}\x00`;
+      return putPlaceholder(renderLatex(tex, true));
     });
 
-    // Protect \(...\) inline math
     processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_, tex) => {
-      const id = placeholders.length;
-      try {
-        const rendered = katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false });
-        placeholders.push({ type: "latex", html: rendered });
-      } catch (e) {
-        placeholders.push({ type: "latex", html: escapeHtml(tex) });
-      }
-      return `\x00PLACEHOLDER_${id}\x00`;
+      return putPlaceholder(renderLatex(tex, false));
     });
 
-    let html = escapeHtml(processed);
-
-    // Restore code blocks
-    html = html.replace(/\x00PLACEHOLDER_(\d+)\x00/g, (_, idx) => {
-      const p = placeholders[parseInt(idx)];
-      if (p.type === "codeblock") {
-        const match = p.raw.match(/```(\w*)\n([\s\S]*?)```/);
-        return `<pre><code>${escapeHtml(match[2].trim())}</code></pre>`;
-      }
-      if (p.type === "inlinecode") {
-        const match = p.raw.match(/`([^`]+)`/);
-        return `<code>${escapeHtml(match[1])}</code>`;
-      }
-      if (p.type === "latex") {
-        return p.html;
-      }
-      return p.raw;
-    });
-
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-    html = html.replace(/^&gt; (.+)$/gm, "<blockquote>$1</blockquote>");
-    html = html.replace(/^[*-] (.+)$/gm, "<li>$1</li>");
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-    html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
-
-    html = html.replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener">$1</a>'
-    );
-
-    html = html
-      .split("\n\n")
-      .map((block) => {
-        block = block.trim();
-        if (!block) return "";
-        if (
-          block.startsWith("<h") ||
-          block.startsWith("<pre") ||
-          block.startsWith("<ul") ||
-          block.startsWith("<ol") ||
-          block.startsWith("<blockquote") ||
-          block.startsWith("<span class=\"katex")
-        ) {
-          return block;
-        }
-        return `<p>${block.replace(/\n/g, "<br>")}</p>`;
-      })
-      .join("");
-
+    const parsed = globalThis.marked?.parse
+      ? marked.parse(processed, { gfm: true, breaks: true })
+      : `<p>${escapeHtml(processed).replace(/\n/g, "<br>")}</p>`;
+    let html = sanitizeMarkdownHtml(parsed);
+    for (const [token, replacement] of placeholders) {
+      html = html.split(token).join(replacement);
+    }
     return html;
+  }
+
+  function looksLikeMath(tex) {
+    return tex.length === 1 || /[\\^_=]|(?:\d\s*[+*/<>])|(?:[+*/<>]\s*\d)/.test(tex);
+  }
+
+  function renderLatex(tex, displayMode) {
+    try {
+      if (!globalThis.katex?.renderToString) throw new Error("KaTeX is unavailable");
+      return katex.renderToString(tex.trim(), { displayMode, throwOnError: false });
+    } catch (e) {
+      const delimiters = displayMode ? ["$$", "$$"] : ["$", "$"];
+      return `<code>${escapeHtml(`${delimiters[0]}${tex}${delimiters[1]}`)}</code>`;
+    }
+  }
+
+  function renderCodeBlock(code, info) {
+    const language = normalizeCodeLanguage(info);
+    const displayLanguage = language ? language.toUpperCase() : "TEXT";
+    const codeClass = `language-${language || "none"}`;
+    let rendered = escapeHtml(code);
+    try {
+      if (language && globalThis.Prism?.languages?.[language]) {
+        rendered = Prism.highlight(code, Prism.languages[language], language);
+      }
+    } catch (e) {
+      // Plain text is always preferable to a malformed or missing highlight.
+    }
+    return `<div class="code-block"><div class="code-block-header"><span>${displayLanguage}</span><button class="code-copy" type="button">Copy</button></div><pre class="${codeClass}"><code class="${codeClass}">${rendered}</code></pre></div>`;
+  }
+
+  function normalizeCodeLanguage(info) {
+    const source = (info || "").trim().split(/\s+/)[0].toLowerCase();
+    const aliases = {
+      js: "javascript", node: "javascript", html: "markup", xml: "markup", svg: "markup",
+      sh: "bash", shell: "bash", zsh: "bash", py: "python", yml: "yaml",
+      ts: "typescript", cs: "csharp", "c#": "csharp", "c++": "cpp",
+      golang: "go", rs: "rust", md: "markdown", text: "", plaintext: "",
+    };
+    return aliases[source] ?? source;
+  }
+
+  function sanitizeMarkdownHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const allowedTags = new Set([
+      "a", "article", "blockquote", "br", "code", "del", "div", "em", "h1", "h2", "h3",
+      "h4", "h5", "h6", "hr", "img", "input", "kbd", "li", "ol", "p", "pre", "s",
+      "span", "strong", "sub", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul",
+    ]);
+    for (const element of [...template.content.querySelectorAll("*")]) {
+      const tag = element.tagName.toLowerCase();
+      if (!allowedTags.has(tag)) {
+        element.replaceWith(document.createTextNode(element.outerHTML));
+        continue;
+      }
+      for (const attribute of [...element.attributes]) {
+        const name = attribute.name.toLowerCase();
+        const value = attribute.value;
+        const allowed =
+          (tag === "a" && ["href", "title"].includes(name)) ||
+          (tag === "img" && ["src", "alt", "title"].includes(name)) ||
+          (["code", "pre"].includes(tag) && name === "class") ||
+          (tag === "ol" && name === "start") ||
+          (["th", "td"].includes(tag) && name === "align") ||
+          (tag === "input" && ["checked", "disabled", "type"].includes(name));
+        if (!allowed) element.removeAttribute(attribute.name);
+        else if (name === "href" || name === "src") {
+          const safeUrl = getSafeUrl(value, name === "href" ? ["https:", "http:", "mailto:"] : ["https:", "http:"]);
+          if (safeUrl) element.setAttribute(attribute.name, safeUrl);
+          else element.removeAttribute(attribute.name);
+        } else if (name === "class") {
+          const safeClasses = value.split(/\s+/).filter((item) => /^language-[a-z0-9-]+$/i.test(item));
+          if (safeClasses.length) element.setAttribute("class", safeClasses.join(" "));
+          else element.removeAttribute("class");
+        } else if (tag === "input" && name === "type" && value !== "checkbox") {
+          element.removeAttribute("type");
+        }
+      }
+      if (tag === "a" && element.hasAttribute("href")) {
+        element.setAttribute("target", "_blank");
+        element.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+    return template.innerHTML;
   }
 
   function escapeHtml(text) {
@@ -690,8 +717,15 @@
     return div.innerHTML;
   }
 
-  function escapeAttr(text) {
-    return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function getSafeUrl(encodedHref, allowedProtocols) {
+    const decoder = document.createElement("textarea");
+    decoder.innerHTML = encodedHref;
+    try {
+      const url = new URL(decoder.value);
+      return allowedProtocols.includes(url.protocol) ? url.href : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   // ===== Chat Logic =====
@@ -699,12 +733,12 @@
     if (isStreaming) return;
     if (!text && !action) return;
 
-    isStreaming = true;
+    const historyForRequest = conversationHistory.slice(-10);
     const requestId = ++currentRequestId;
+    let displayText = text;
 
     if (text && !action) {
       addUserMessage(text);
-      conversationHistory.push({ role: "user", text: text });
     } else if (action) {
       const actionLabels = {
         summarize: "Summarize this page",
@@ -715,42 +749,25 @@
         "paper-summary": "Analyze as research paper",
       };
       const label = actionLabels[action] || action;
+      displayText = label;
       addUserMessage(label);
-      conversationHistory.push({ role: "user", text: label });
     }
 
     const aiContent = addAiMessage();
     let fullResponse = "";
+    let settled = false;
 
     chatInput.value = "";
     chatInput.style.height = "auto";
-    updateSendButton();
-
-    browser.runtime.sendMessage({
-      type: "CHAT_REQUEST",
-      requestId,
-      userMessage: text || "",
-      action: action,
-      conversationHistory: conversationHistory.slice(-10),
-    });
+    setStreaming(true);
 
     function responseHandler(msg) {
       if (msg.type !== "CHAT_RESPONSE" || msg.requestId !== requestId) return;
 
       if (msg.error) {
-        aiContent.closest(".message").classList.add("message-error");
-        if (msg.error === "NO_API_KEY") {
-          aiContent.innerHTML =
-            'No API key set. Click the <strong>settings</strong> icon to add your Gemini API key.';
-          messages.push({ role: "error", text: "No API key set." });
-        } else {
-          const errText = msg.message || "An error occurred.";
-          aiContent.innerHTML = renderMarkdown(errText);
-          messages.push({ role: "error", text: errText });
-        }
-        isStreaming = false;
-        saveCurrentConversation();
-        browser.runtime.onMessage.removeListener(responseHandler);
+        finishWithError(msg.error === "NO_API_KEY"
+          ? "No API key set. Click the settings icon to add your Gemini API key."
+          : msg.message || "An error occurred.");
         return;
       }
 
@@ -760,19 +777,89 @@
 
         fullResponse += msg.chunk;
         aiContent.innerHTML = renderMarkdown(fullResponse);
+        if (!isPinnedToBottom) jumpLatestBtn.classList.remove("hidden");
         scrollToBottom();
       }
 
       if (msg.done) {
-        isStreaming = false;
+        if (settled) return;
+        settled = true;
+        conversationHistory.push({ role: "user", text: msg.requestText || displayText });
         conversationHistory.push({ role: "model", text: fullResponse });
         messages.push({ role: "ai", text: fullResponse });
-        saveCurrentConversation();
-        browser.runtime.onMessage.removeListener(responseHandler);
+        finishRequest();
       }
     }
 
     browser.runtime.onMessage.addListener(responseHandler);
+    activeRequest = {
+      requestId,
+      cancel() {
+        if (settled) return;
+        settled = true;
+        const typingIndicator = aiContent.querySelector(".typing-indicator");
+        if (typingIndicator) typingIndicator.remove();
+        if (!fullResponse) aiContent.textContent = "Response stopped.";
+        conversationHistory.push({ role: "user", text: displayText });
+        if (fullResponse) {
+          conversationHistory.push({ role: "model", text: fullResponse });
+          messages.push({ role: "ai", text: fullResponse });
+        } else {
+          messages.push({ role: "error", text: "Response stopped." });
+        }
+        finishRequest();
+      },
+    };
+
+    try {
+      await browser.runtime.sendMessage({
+        type: "CHAT_REQUEST",
+        requestId,
+        userMessage: text || "",
+        action,
+        conversationHistory: historyForRequest,
+      });
+    } catch (e) {
+      finishWithError("Could not start the request. Please try again.");
+    }
+
+    function finishWithError(message) {
+      if (settled) return;
+      settled = true;
+      aiContent.closest(".message").classList.add("message-error");
+      aiContent.textContent = message;
+      messages.push({ role: "error", text: message });
+      finishRequest();
+    }
+
+    function finishRequest() {
+      browser.runtime.onMessage.removeListener(responseHandler);
+      if (activeRequest?.requestId === requestId) activeRequest = null;
+      setStreaming(false);
+      saveCurrentConversation();
+    }
+  }
+
+  async function cancelCurrentRequest() {
+    const request = activeRequest;
+    if (!request) return;
+    request.cancel();
+    await browser.runtime.sendMessage({
+      type: "CANCEL_CHAT_REQUEST",
+      requestId: request.requestId,
+    }).catch(() => {});
+  }
+
+  function setStreaming(streaming) {
+    isStreaming = streaming;
+    messagesArea.setAttribute("aria-busy", String(streaming));
+    quickActions.querySelectorAll(".action-btn").forEach((btn) => {
+      btn.disabled = streaming;
+    });
+    clearBtn.disabled = streaming;
+    historyBtn.disabled = streaming;
+    cancelBtn.classList.toggle("hidden", !streaming);
+    updateSendButton();
   }
 
   // ===== YouTube Transcript =====
@@ -798,7 +885,7 @@
         messages.push({ role: "error", text: response.error });
       } else if (response?.transcript) {
         aiContent.closest(".message").remove();
-        addTranscriptMessage(response.transcript, response.videoTitle, response.aiGenerated);
+        addTranscriptMessage(response.transcript, response.videoTitle, response.aiGenerated, response.source);
       } else {
         aiContent.closest(".message").classList.add("message-error");
         aiContent.textContent = "Failed to get transcript.";
@@ -822,6 +909,34 @@
     sendBtn.addEventListener("click", () => {
       const text = chatInput.value.trim();
       if (text) sendMessage(text);
+    });
+
+    cancelBtn.addEventListener("click", cancelCurrentRequest);
+
+    jumpLatestBtn.addEventListener("click", () => {
+      isPinnedToBottom = true;
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+      jumpLatestBtn.classList.add("hidden");
+    });
+
+    messagesArea.addEventListener("scroll", () => {
+      const remaining = messagesArea.scrollHeight - messagesArea.scrollTop - messagesArea.clientHeight;
+      isPinnedToBottom = remaining < 24;
+      if (isPinnedToBottom) jumpLatestBtn.classList.add("hidden");
+    });
+
+    messagesArea.addEventListener("click", (event) => {
+      const copyButton = event.target.closest(".code-copy");
+      if (!copyButton) return;
+      const code = copyButton.closest(".code-block")?.querySelector("code")?.textContent;
+      if (code == null) return;
+      navigator.clipboard.writeText(code).then(() => {
+        copyButton.textContent = "Copied";
+        setTimeout(() => { copyButton.textContent = "Copy"; }, 1600);
+      }).catch(() => {
+        copyButton.textContent = "Copy failed";
+        setTimeout(() => { copyButton.textContent = "Copy"; }, 1600);
+      });
     });
 
     chatInput.addEventListener("keydown", (e) => {
@@ -850,7 +965,8 @@
     });
 
     // New Chat — save current, start fresh
-    clearBtn.addEventListener("click", () => {
+    clearBtn.addEventListener("click", async () => {
+      if (isStreaming) await cancelCurrentRequest();
       if (messages.length > 0) {
         saveCurrentConversation();
       }
@@ -871,18 +987,16 @@
 
     // Settings
     settingsBtn.addEventListener("click", () => {
-      settingsModal.classList.remove("hidden");
+      openSettings();
     });
 
     settingsClose.addEventListener("click", () => {
-      settingsModal.classList.add("hidden");
-      if (isEditingShortcut) stopEditingShortcut(false);
+      closeSettings();
     });
 
     settingsModal.addEventListener("click", (e) => {
       if (e.target === settingsModal) {
-        settingsModal.classList.add("hidden");
-        if (isEditingShortcut) stopEditingShortcut(false);
+        closeSettings();
       }
     });
 
@@ -937,28 +1051,60 @@
 
     selectionDismiss.addEventListener("click", () => {
       updateSelectionBanner("");
+      browser.runtime.sendMessage({ type: "CLEAR_SELECTION" }).catch(() => {});
     });
+  }
 
+  function setupRuntimeListeners() {
     browser.runtime.onMessage.addListener((msg) => {
-      if (msg.type === "SELECTION_UPDATE") {
-        updateSelectionBanner(msg.selection);
-      }
-      if (msg.type === "YOUTUBE_NAVIGATION") {
+      if (msg.type === "SELECTION_UPDATE") updateSelectionBanner(msg.selection);
+      if (msg.type === "YOUTUBE_NAVIGATION" || msg.type === "TAB_CONTEXT_CHANGED") {
         updateContextBar();
       }
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        updateContextBar();
-      }
+      if (!document.hidden) updateContextBar();
     });
 
-    setInterval(() => {
-      if (!document.hidden) {
-        updateContextBar();
+    document.addEventListener("keydown", (e) => {
+      if (!settingsModal.classList.contains("hidden")) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeSettings();
+        } else if (e.key === "Tab") {
+          trapModalFocus(e);
+        }
       }
-    }, 5000);
+    });
+  }
+
+  function openSettings() {
+    lastFocusedElement = document.activeElement;
+    settingsModal.classList.remove("hidden");
+    apiKeyInput.focus();
+  }
+
+  function closeSettings() {
+    settingsModal.classList.add("hidden");
+    if (isEditingShortcut) stopEditingShortcut(false);
+    lastFocusedElement?.focus();
+  }
+
+  function trapModalFocus(event) {
+    const focusable = settingsModal.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function updateSendButton() {

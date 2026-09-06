@@ -27,67 +27,161 @@
     return `${m}:${String(sec).padStart(2, "0")}`;
   }
 
-  // Extract caption tracks from ytInitialPlayerResponse in page scripts
-  function getCaptionTracks() {
-    const scripts = document.querySelectorAll("script");
-    for (const script of scripts) {
-      const text = script.textContent;
-      if (!text.includes("ytInitialPlayerResponse")) continue;
+  // Extract a JSON object or array without assuming what follows it. YouTube's
+  // inline player data regularly changes its surrounding JavaScript, so a
+  // balanced scan is substantially less brittle than a regular expression.
+  function extractBalancedJson(text, startAt) {
+    const start = text.slice(startAt).search(/[\[{]/);
+    if (start < 0) return null;
 
-      // Match the player response JSON — use a greedy match up to the closing };
-      const match = text.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var\s|<\/script)/s);
-      if (!match) continue;
+    const first = startAt + start;
+    const closing = text[first] === "{" ? "}" : "]";
+    const stack = [closing];
+    let inString = false;
+    let escaped = false;
 
-      try {
-        const data = JSON.parse(match[1]);
-        const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        const title = data?.videoDetails?.title || "";
-        if (tracks && tracks.length > 0) {
-          return { tracks, title };
-        }
-      } catch (e) {
-        // Try alternate: search for captionTracks directly
+    for (let i = first + 1; i < text.length; i++) {
+      const char = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        stack.push("}");
+      } else if (char === "[") {
+        stack.push("]");
+      } else if (char === stack[stack.length - 1]) {
+        stack.pop();
+        if (stack.length === 0) return text.slice(first, i + 1);
+      }
+    }
+    return null;
+  }
+
+  function captionDataFromPlayerResponse(data) {
+    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+    return { tracks, title: data?.videoDetails?.title || "" };
+  }
+
+  function captionDataFromText(text) {
+    const playerMarker = text.indexOf("ytInitialPlayerResponse");
+    if (playerMarker >= 0) {
+      const raw = extractBalancedJson(text, playerMarker);
+      if (raw) {
+        try {
+          const captionData = captionDataFromPlayerResponse(JSON.parse(raw));
+          if (captionData) return captionData;
+        } catch (e) {}
       }
     }
 
-    // Fallback: search for captionTracks in any script
-    for (const script of document.querySelectorAll("script")) {
-      const text = script.textContent;
-      const match = text.match(/"captionTracks":\s*(\[.+?\])/s);
-      if (match) {
+    const tracksMarker = text.indexOf('"captionTracks"');
+    if (tracksMarker >= 0) {
+      const raw = extractBalancedJson(text, tracksMarker);
+      if (raw) {
         try {
-          const tracks = JSON.parse(match[1]);
-          if (tracks && tracks.length > 0) {
+          const tracks = JSON.parse(raw);
+          if (Array.isArray(tracks) && tracks.length) {
             return { tracks, title: document.title.replace(/ - YouTube$/, "") };
           }
         } catch (e) {}
       }
     }
+    return null;
+  }
+
+  // The player response can disappear from the live DOM after YouTube's SPA
+  // hydration. Refetching the watch document is a same-origin, cookie-aware
+  // fallback and avoids manipulating the visible YouTube transcript panel.
+  async function getCaptionTracks() {
+    for (const script of document.querySelectorAll("script")) {
+      const captionData = captionDataFromText(script.textContent || "");
+      if (captionData) return captionData;
+    }
+
+    try {
+      const response = await fetch(window.location.href, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (response.ok) return captionDataFromText(await response.text());
+    } catch (e) {}
 
     return null;
   }
 
-  // Fetch and parse transcript XML
-  async function fetchTranscriptXml(baseUrl) {
-    const resp = await fetch(baseUrl);
-    if (!resp.ok) throw new Error("Failed to fetch transcript");
-    const xml = await resp.text();
-    if (!xml || xml.length === 0) throw new Error("Empty transcript response");
+  function selectCaptionTrack(tracks) {
+    const languages = Array.from(new Set(
+      (Array.isArray(navigator.languages) ? navigator.languages : [])
+        .concat(navigator.language || "en")
+        .filter(Boolean)
+        .map(language => language.toLowerCase())
+    ));
 
-    // Parse with DOMParser (available in content scripts)
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, "text/xml");
-    const textElements = doc.querySelectorAll("text");
+    return tracks.slice().sort((a, b) => scoreTrack(a) - scoreTrack(b))[0];
 
+    function scoreTrack(track) {
+      const language = (track.languageCode || "").toLowerCase();
+      const exact = languages.indexOf(language);
+      const partial = languages.findIndex(preferred =>
+        language.startsWith(`${preferred.split("-")[0]}-`) ||
+        preferred.startsWith(`${language}-`)
+      );
+      const languageScore = exact >= 0 ? exact : partial >= 0 ? 20 + partial : 100;
+      // Creator-provided tracks tend to need less cleanup than ASR tracks.
+      return languageScore + (track.kind === "asr" ? 0.5 : 0);
+    }
+  }
+
+  function parseJson3Transcript(data) {
     const entries = [];
-    for (const el of textElements) {
-      const start = parseFloat(el.getAttribute("start"));
-      const dur = parseFloat(el.getAttribute("dur") || "0");
-      const text = decodeXmlEntities(el.textContent || "").trim();
-      if (text) {
-        entries.push({ start, dur, text });
+    for (const event of data?.events || []) {
+      const text = decodeXmlEntities((event.segs || []).map(segment => segment.utf8 || "").join(""))
+        .replace(/\s+/g, " ")
+        .trim();
+      const start = Number(event.tStartMs) / 1000;
+      if (text && Number.isFinite(start)) {
+        entries.push({ start, dur: Number(event.dDurationMs || 0) / 1000, text });
       }
     }
+    return entries;
+  }
+
+  function parseXmlTranscript(xml) {
+    const doc = new DOMParser().parseFromString(xml, "text/xml");
+    const entries = [];
+    for (const el of doc.querySelectorAll("text")) {
+      const text = decodeXmlEntities(el.textContent || "").trim();
+      const start = parseFloat(el.getAttribute("start"));
+      if (text && Number.isFinite(start)) {
+        entries.push({ start, dur: parseFloat(el.getAttribute("dur") || "0"), text });
+      }
+    }
+    return entries;
+  }
+
+  // JSON3 is the structured caption format that YouTube's player uses. Keep
+  // XML as a compatibility fallback for tracks that decline JSON3.
+  async function fetchTranscript(baseUrl) {
+    const jsonUrl = new URL(baseUrl);
+    jsonUrl.searchParams.set("fmt", "json3");
+    try {
+      const jsonResponse = await fetch(jsonUrl.href, { credentials: "include" });
+      if (jsonResponse.ok) {
+        const entries = parseJson3Transcript(await jsonResponse.json());
+        if (entries.length) return entries;
+      }
+    } catch (e) {}
+
+    const xmlResponse = await fetch(baseUrl, { credentials: "include" });
+    if (!xmlResponse.ok) throw new Error("Caption track request failed");
+    const entries = parseXmlTranscript(await xmlResponse.text());
+    if (!entries.length) throw new Error("Caption track was empty");
     return entries;
   }
 
@@ -115,28 +209,28 @@
 
   // Main transcript extraction
   async function getTranscript() {
-    const captionData = getCaptionTracks();
+    const captionData = await getCaptionTracks();
 
     if (captionData) {
       const { tracks, title } = captionData;
-      // Prefer English
-      const track = tracks.find(t => t.languageCode === "en")
-        || tracks.find(t => t.languageCode?.startsWith("en"))
-        || tracks[0];
+      const track = selectCaptionTrack(tracks);
 
       if (track?.baseUrl) {
         try {
-          const entries = await fetchTranscriptXml(track.baseUrl);
+          const entries = await fetchTranscript(track.baseUrl);
           if (entries.length > 0) {
             const formatted = entries.map(e => `[${formatTime(e.start)}] ${e.text}`).join("\n");
             return {
               transcript: formatted,
               entries: entries.length,
               videoTitle: title || document.title.replace(/ - YouTube$/, ""),
+              source: "youtube-captions",
+              language: track.languageCode || "",
+              autoGenerated: track.kind === "asr",
             };
           }
         } catch (e) {
-          console.warn("Transcript XML fetch failed:", e);
+          console.warn("Caption-track fetch failed:", e);
           // Fall through to DOM fallback
         }
       }
@@ -147,9 +241,10 @@
     if (domEntries && domEntries.length > 0) {
       const formatted = domEntries.map(e => `[${formatTime(e.start)}] ${e.text}`).join("\n");
       return {
-        transcript: formatted,
-        entries: domEntries.length,
-        videoTitle: document.title.replace(/ - YouTube$/, ""),
+      transcript: formatted,
+      entries: domEntries.length,
+      videoTitle: document.title.replace(/ - YouTube$/, ""),
+      source: "youtube-transcript-panel",
       };
     }
 

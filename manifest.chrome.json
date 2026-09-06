@@ -1,19 +1,17 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Zen AI Sidebar",
   "version": "1.1.0",
-  "description": "AI-powered sidebar for Zen Browser using Gemini API. Summarize pages, explain selections, and ask contextual questions.",
+  "description": "AI-powered sidebar for Chrome using Gemini API. Summarize pages, explain selections, and ask contextual questions.",
   "icons": {
     "48": "icons/icon-48.png",
     "96": "icons/icon-96.png"
   },
-  "sidebar_action": {
-    "default_title": "Zen AI",
-    "default_panel": "sidebar/sidebar.html",
-    "default_icon": {
-      "48": "icons/icon-48.png",
-      "96": "icons/icon-96.png"
-    }
+  "action": {
+    "default_title": "Zen AI"
+  },
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
   },
   "commands": {
     "toggle-sidebar": {
@@ -28,10 +26,10 @@
     "activeTab",
     "tabs",
     "storage",
-    "<all_urls>",
-    "theme",
+    "sidePanel",
     "nativeMessaging"
   ],
+  "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -45,12 +43,6 @@
     }
   ],
   "background": {
-    "scripts": ["shared/browser-api.js", "background/background.js"]
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "zen-ai-sidebar@extension",
-      "strict_min_version": "109.0"
-    }
+    "service_worker": "background/background.js"
   }
 }

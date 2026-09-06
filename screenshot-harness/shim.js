@@ -133,11 +133,13 @@
 
 	if (!scene) return;
 
-	// sidebar.js registers its listeners partway through an async init(), which
-	// can finish after window.load. Waiting for the first listener is the only
-	// reliable signal that the UI is ready to be driven.
+	// sidebar.js registers its listeners during async initialization, which can
+	// finish after window.load. Its ready marker means both the message and click
+	// handlers are installed before the harness drives the real UI.
 	const whenReady = (fn) => {
-		const tick = () => (listeners.length ? fn() : setTimeout(tick, 25));
+		const tick = () => (document.documentElement.dataset.sidebarReady === 'true'
+			? fn()
+			: setTimeout(tick, 25));
 		tick();
 	};
 

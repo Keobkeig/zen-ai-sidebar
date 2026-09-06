@@ -1,0 +1,18 @@
+{
+  "page": {
+    "title": "Renderer output check",
+    "url": "https://example.test/renderer"
+  },
+  "messages": [
+    {
+      "role": "user",
+      "text": "Show the supported answer formats."
+    },
+    {
+      "role": "ai",
+      "text": "# Render check\n\nInline math: $E = mc^2$. Display math:\n\n$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$\n\n- **Bold** and *italic* text\n- [Safe external link](https://example.com)\n- [x] Completed checklist item\n\n| Format | Status |\n| --- | --- |\n| Markdown | Ready |\n| KaTeX | Ready |\n\n```typescript\nconst square = (value: number) => value ** 2;\nconsole.log(square(4));\n```\n\nInline code remains literal: `const marker = \"**not bold**\";`"
+    }
+  ],
+  "wordsPerChunk": 8,
+  "msPerChunk": 90
+}

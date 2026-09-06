@@ -7,22 +7,40 @@
   <link rel="stylesheet" href="sidebar.css">
   <link rel="stylesheet" href="lib/katex/katex.min.css">
   <script src="lib/katex/katex.min.js"></script>
+  <script src="lib/marked/marked.umd.js"></script>
+  <script src="lib/prism/prism.min.js"></script>
+  <script src="lib/prism/prism-bash.min.js"></script>
+  <script src="lib/prism/prism-c.min.js"></script>
+  <script src="lib/prism/prism-cpp.min.js"></script>
+  <script src="lib/prism/prism-csharp.min.js"></script>
+  <script src="lib/prism/prism-diff.min.js"></script>
+  <script src="lib/prism/prism-go.min.js"></script>
+  <script src="lib/prism/prism-java.min.js"></script>
+  <script src="lib/prism/prism-json.min.js"></script>
+  <script src="lib/prism/prism-jsx.min.js"></script>
+  <script src="lib/prism/prism-markdown.min.js"></script>
+  <script src="lib/prism/prism-python.min.js"></script>
+  <script src="lib/prism/prism-rust.min.js"></script>
+  <script src="lib/prism/prism-sql.min.js"></script>
+  <script src="lib/prism/prism-typescript.min.js"></script>
+  <script src="lib/prism/prism-tsx.min.js"></script>
+  <script src="lib/prism/prism-yaml.min.js"></script>
 </head>
 <body>
   <div class="sidebar-container">
     <!-- Header (compact, right-aligned icons) -->
     <div class="header">
-      <button class="icon-btn" id="historyBtn" title="Chat History">
+      <button class="icon-btn" id="historyBtn" type="button" title="Chat History" aria-label="Chat history">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
         </svg>
       </button>
-      <button class="icon-btn" id="clearBtn" title="New Chat">
+      <button class="icon-btn" id="clearBtn" type="button" title="New Chat" aria-label="New chat">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
         </svg>
       </button>
-      <button class="icon-btn" id="settingsBtn" title="Settings">
+      <button class="icon-btn" id="settingsBtn" type="button" title="Settings" aria-label="Settings">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6m8.66-13l-5.2 3m-7 4l-5.2 3M22.66 17l-5.2-3m-7-4l-5.2-3"/>
         </svg>
@@ -30,10 +48,10 @@
     </div>
 
     <!-- History panel (slides over messages) -->
-    <div class="history-panel hidden" id="historyPanel">
+    <div class="history-panel hidden" id="historyPanel" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
       <div class="history-header">
-        <h3>Chat History</h3>
-        <button class="icon-btn" id="historyClose">&times;</button>
+        <h3 id="historyTitle">Chat History</h3>
+        <button class="icon-btn" id="historyClose" type="button" aria-label="Close chat history">&times;</button>
       </div>
       <div class="history-list" id="historyList"></div>
     </div>
@@ -46,11 +64,11 @@
         </svg>
       </div>
       <span class="selection-text" id="selectionText"></span>
-      <button class="selection-dismiss" id="selectionDismiss">&times;</button>
+      <button class="selection-dismiss" id="selectionDismiss" type="button" aria-label="Clear highlighted text">&times;</button>
     </div>
 
     <!-- Messages area -->
-    <div class="messages" id="messagesArea">
+    <div class="messages" id="messagesArea" aria-live="polite" aria-busy="false">
       <div class="welcome-message">
         <div class="welcome-icon">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -61,6 +79,8 @@
         <p>Ask questions about the current page, summarize content, or get explanations for highlighted text.</p>
       </div>
     </div>
+
+    <button class="jump-latest hidden" id="jumpLatestBtn" type="button">Jump to latest</button>
 
     <!-- Quick actions -->
     <div class="quick-actions" id="quickActions">
@@ -115,7 +135,12 @@
           rows="1"
           autocomplete="off"
         ></textarea>
-        <button class="send-btn" id="sendBtn" disabled>
+        <button class="cancel-btn hidden" id="cancelBtn" type="button" aria-label="Stop generating" title="Stop generating">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+        </button>
+        <button class="send-btn" id="sendBtn" type="button" aria-label="Send message" disabled>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
@@ -126,10 +151,10 @@
 
   <!-- Settings modal -->
   <div class="modal-overlay hidden" id="settingsModal">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-header">
-        <h3>Settings</h3>
-        <button class="icon-btn modal-close" id="settingsClose">&times;</button>
+        <h3 id="settingsTitle">Settings</h3>
+        <button class="icon-btn modal-close" id="settingsClose" type="button" aria-label="Close settings">&times;</button>
       </div>
       <div class="modal-body">
         <div class="setting-group">
@@ -137,7 +162,7 @@
           <p class="setting-hint">Get your key from <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a></p>
           <div class="api-key-input-wrapper">
             <input type="password" id="apiKeyInput" placeholder="Enter your API key..." autocomplete="off" />
-            <button class="icon-btn toggle-visibility" id="toggleKeyVisibility" title="Show/hide key">
+            <button class="icon-btn toggle-visibility" id="toggleKeyVisibility" type="button" title="Show or hide API key" aria-label="Show or hide API key">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
               </svg>
@@ -151,6 +176,21 @@
             <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite (Fastest)</option>
             <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Powerful)</option>
           </select>
+        </div>
+        <div class="setting-group privacy-setting">
+          <label class="checkbox-label" for="includePageContext">
+            <input type="checkbox" id="includePageContext" checked />
+            Include page content with requests
+          </label>
+          <p class="setting-hint">When enabled, page text is sent to Gemini only when you ask a question or use an action. Highlighted text is sent only when you use Explain.</p>
+        </div>
+        <div class="setting-group">
+          <label for="transcriptProvider">No-caption video fallback</label>
+          <select id="transcriptProvider">
+            <option value="local-whisper">Local Whisper (private, recommended)</option>
+            <option value="gemini">Gemini video transcription (cloud)</option>
+          </select>
+          <p class="setting-hint">Used only when YouTube has no caption track. Local Whisper needs the one-time native helper setup.</p>
         </div>
         <div class="setting-group">
           <label for="themeSelect">Theme</label>
@@ -170,15 +210,15 @@
             <optgroup label="Custom" id="customThemeGroup"></optgroup>
           </select>
           <div class="theme-import-row">
-            <button class="import-theme-btn" id="importThemeBtn">Import Theme</button>
+            <button class="import-theme-btn" id="importThemeBtn" type="button">Import Theme</button>
             <input type="file" id="themeFileInput" accept=".json" class="hidden" />
           </div>
         </div>
         <div class="setting-group">
           <label>Layout</label>
           <div class="theme-toggle-group">
-            <button class="layout-option" data-layout-value="default">Default</button>
-            <button class="layout-option" data-layout-value="mirrored">Mirrored</button>
+            <button class="layout-option" type="button" data-layout-value="default">Default</button>
+            <button class="layout-option" type="button" data-layout-value="mirrored">Mirrored</button>
           </div>
         </div>
         <div class="setting-group">
@@ -186,7 +226,7 @@
           <p class="setting-hint">Current keyboard shortcut for the sidebar</p>
           <div class="shortcut-input-wrapper">
             <input type="text" id="shortcutInput" readonly placeholder="Loading..." />
-            <button class="icon-btn" id="editShortcutBtn" title="Edit shortcut">
+            <button class="icon-btn" id="editShortcutBtn" type="button" title="Edit shortcut" aria-label="Edit shortcut">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
               </svg>
@@ -194,12 +234,13 @@
           </div>
           <p class="setting-hint shortcut-hint hidden" id="shortcutHint">Press new shortcut combination, then Enter to confirm. Esc to cancel.</p>
         </div>
-        <button class="save-btn" id="saveSettings">Save Settings</button>
+        <button class="save-btn" id="saveSettings" type="button">Save Settings</button>
         <div class="save-status hidden" id="saveStatus"></div>
       </div>
     </div>
   </div>
 
+  <script src="../shared/browser-api.js"></script>
   <script src="theme-manager.js"></script>
   <script src="sidebar.js"></script>
 </body>
